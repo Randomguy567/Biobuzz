@@ -1,17 +1,22 @@
 
-package org.firstinspires.ftc.teamcode.util.test;
+package org.firstinspires.ftc.teamcode.TeleOp;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
+import dev.nextftc.control.feedback.PIDCoefficients;
+import dev.nextftc.control.feedback.PIDController;
+
 @TeleOp
-public class TeleOp1 extends OpMode {
+public class ScrimTeleOp extends OpMode {
 
     // motors
     DcMotor motorTR, motorTL, motorBL, motorBR;
@@ -20,17 +25,39 @@ public class TeleOp1 extends OpMode {
 
     // blockers
     Servo pollenBlocker, nectarBlocker;
-
     final double POLLEN_OPEN = 0.0;
     final double POLLEN_CLOSED = 0.5;
 
     final double NECTAR_OPEN = 0.0;
     final double NECTAR_CLOSED = 0.5;
 
-    boolean previousA = false;
+
     boolean pollenBlockersOpen = false;
 
     boolean nectarBlockersOpen = false;
+
+    DcMotorEx intTrans; //intake transfer
+    boolean intTransToggle = false;
+    boolean intTransDirection = true; // true for intake, false for outtake
+
+
+
+    //shooter stuff
+    PIDCoefficients
+            nectarCoeffs = new PIDCoefficients(0,0,0),
+            pollenCoeffs = new PIDCoefficients(0,0,0); // TODO tune these
+
+    PIDController nectarPID = new PIDController(nectarCoeffs), pollenPID = new PIDController(pollenCoeffs);
+
+    DcMotorEx pollen, nectar;
+
+
+    double nectarVelo = 0; // TODO tune this
+    double pollenVelo = 0;// TODO tune this
+
+    boolean shooting = false;
+
+
 
 
     @Override
@@ -59,12 +86,25 @@ public class TeleOp1 extends OpMode {
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
         // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
         imu1.initialize(parameters);
+
+        intTrans = hardwareMap.get(DcMotorEx.class, "intTrans");
+        intTrans.setDirection(DcMotorSimple.Direction.FORWARD); // TODO make sure this direction is accurate for intaking balls
+
+        pollen = hardwareMap.get(DcMotorEx.class,"pollenFly");
+        nectar = hardwareMap.get(DcMotorEx.class,"nectarFly");
+
     }
 
     @Override
     public void loop() {
 
+        double nectarError = nectarVelo - nectar.getVelocity();
+        double pollenError = pollenVelo - pollen.getVelocity();
+        double pollenPower = pollenPID.calculate(pollenError);
+        double nectarPower = nectarPID.calculate(nectarError);
 
+
+        // drive code
         double y = -gamepad1.left_stick_y;
         double x = gamepad1.left_stick_x;
         double rx = gamepad1.right_stick_x;
@@ -95,25 +135,62 @@ public class TeleOp1 extends OpMode {
         motorTR.setPower(frontRightPower);
         motorBR.setPower(backRightPower);
 
-        if (gamepad1.aWasPressed()) {
-            pollenBlockersOpen = !pollenBlockersOpen;
+    //servo blocker code
 
-            if (pollenBlockersOpen) {
-                pollenBlocker.setPosition(POLLEN_OPEN);
-            } else {
-                pollenBlocker.setPosition(POLLEN_CLOSED);
-            }
+        if (gamepad2.aWasPressed()) {
+            pollenBlockersOpen = !pollenBlockersOpen; // toggle pollen blocker
         }
 
-        if (gamepad1.bWasPressed()) {
-            nectarBlockersOpen = !nectarBlockersOpen;
-
-            if (nectarBlockersOpen) {
-                nectarBlocker.setPosition(NECTAR_OPEN);
-            } else {
-                nectarBlocker.setPosition(NECTAR_CLOSED);
-            }
+        if (pollenBlockersOpen) {
+            pollenBlocker.setPosition(POLLEN_OPEN);
+        } else {
+            pollenBlocker.setPosition(POLLEN_CLOSED);
         }
+
+
+        if (gamepad2.bWasPressed()) {
+            nectarBlockersOpen = !nectarBlockersOpen; // toggle nectar blocker
+        }
+
+        if (nectarBlockersOpen) {
+            nectarBlocker.setPosition(NECTAR_OPEN);
+        } else {
+            nectarBlocker.setPosition(NECTAR_CLOSED);
+        }
+
+
+    // intake + transfer code
+        // intake balls
+        if(gamepad2.dpadUpWasPressed()){
+            intTransToggle = !intTransToggle; // toggle intake on and off
+            intTransDirection = true; // make sure it is intake and not outtake
+        }
+
+        // outtake balls
+        if(gamepad2.dpadDownWasPressed()){
+            intTransToggle = !intTransToggle; // toggle intake
+            intTransDirection = false; // outtake
+        }
+
+        if(intTransToggle) {
+            if (intTransDirection) intTrans.setPower(1); //TODO fine tune this power
+            else intTrans.setPower(-1);
+        }
+
+    // shooting code
+        if(gamepad2.xWasPressed()){
+            shooting = !shooting;
+        }
+
+        if(shooting){
+            nectar.setPower(nectarPower);
+            pollen.setPower(pollenPower);
+        }
+        else{
+            nectar.setPower(0);
+            pollen.setPower(0);
+        }
+
 
     }
 }
