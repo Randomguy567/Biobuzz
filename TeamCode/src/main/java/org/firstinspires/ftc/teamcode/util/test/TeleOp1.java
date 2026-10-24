@@ -15,6 +15,8 @@ public class TeleOp1 extends OpMode {
 
     // motors
     DcMotor motorTR, motorTL, motorBL, motorBR;
+    IMU imu1;
+
 
     // blockers
     Servo pollenBlocker, nectarBlocker;
@@ -26,7 +28,9 @@ public class TeleOp1 extends OpMode {
     final double NECTAR_CLOSED = 0.5;
 
     boolean previousA = false;
-    boolean blockersOpen = false;
+    boolean pollenBlockersOpen = false;
+
+    boolean nectarBlockersOpen = false;
 
 
     @Override
@@ -37,6 +41,7 @@ public class TeleOp1 extends OpMode {
         motorTL = hardwareMap.get(DcMotor.class, "motorTL");
         motorBL = hardwareMap.get(DcMotor.class, "motorBL");
         motorBR = hardwareMap.get(DcMotor.class, "motorBR");
+        imu1 = hardwareMap.get(IMU.class, "imu");
 
         motorTL.setDirection(DcMotor.Direction.REVERSE);
         motorBL.setDirection(DcMotor.Direction.REVERSE);
@@ -49,6 +54,11 @@ public class TeleOp1 extends OpMode {
         pollenBlocker.setPosition(POLLEN_CLOSED);
         nectarBlocker.setPosition(NECTAR_CLOSED);
 
+        IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
+                RevHubOrientationOnRobot.LogoFacingDirection.LEFT,
+                RevHubOrientationOnRobot.UsbFacingDirection.UP));
+        // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
+        imu1.initialize(parameters);
     }
 
     @Override
@@ -59,33 +69,51 @@ public class TeleOp1 extends OpMode {
         double x = gamepad1.left_stick_x;
         double rx = gamepad1.right_stick_x;
 
-        double denominator = Math.max(Math.abs(y) + Math.abs(x) + Math.abs(rx), 1);
-        double frontLeftPower = (y + x + rx) / denominator;
-        double backLeftPower = (y - x + rx) / denominator;
-        double frontRightPower = (y - x - rx) / denominator;
-        double backRightPower = (y + x - rx) / denominator;
+        if (gamepad1.options) {
+            imu1.resetYaw();
+        }
 
-        // Apply drivetrain powers
+        double botHeading = imu1.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+
+        // Rotate the movement direction counter to the bot's rotation
+        double rotX = x * Math.cos(-botHeading) - y * Math.sin(-botHeading);
+        double rotY = x * Math.sin(-botHeading) + y * Math.cos(-botHeading);
+
+        rotX = rotX * 1.1;  // Counteract imperfect strafing
+
+        // Denominator is the largest motor power (absolute value) or 1
+        // This ensures all the powers maintain the same ratio,
+        // but only if at least one is out of the range [-1, 1]
+        double denominator = Math.max(Math.abs(rotY) + Math.abs(rotX) + Math.abs(rx), 1);
+        double frontLeftPower = (rotY + rotX + rx) / denominator;
+        double backLeftPower = (rotY - rotX + rx) / denominator;
+        double frontRightPower = (rotY - rotX - rx) / denominator;
+        double backRightPower = (rotY + rotX - rx) / denominator;
+
         motorTL.setPower(frontLeftPower);
         motorBL.setPower(backLeftPower);
         motorTR.setPower(frontRightPower);
         motorBR.setPower(backRightPower);
 
+        if (gamepad1.aWasPressed()) {
+            pollenBlockersOpen = !pollenBlockersOpen;
 
-        boolean currentA = gamepad2.a;
-
-        if (currentA && !previousA) {
-            blockersOpen = !blockersOpen;
-
-            if (blockersOpen) {
+            if (pollenBlockersOpen) {
                 pollenBlocker.setPosition(POLLEN_OPEN);
-                nectarBlocker.setPosition(NECTAR_OPEN);
             } else {
                 pollenBlocker.setPosition(POLLEN_CLOSED);
+            }
+        }
+
+        if (gamepad1.bWasPressed()) {
+            nectarBlockersOpen = !nectarBlockersOpen;
+
+            if (nectarBlockersOpen) {
+                nectarBlocker.setPosition(NECTAR_OPEN);
+            } else {
                 nectarBlocker.setPosition(NECTAR_CLOSED);
             }
         }
 
-        previousA = currentA;
     }
 }
