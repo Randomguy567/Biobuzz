@@ -74,6 +74,8 @@ public class ScrimTeleOp extends OpMode {
     @Override
     public void init() {
 
+
+
         // Map drivetrain motors
         motorTR = hardwareMap.get(DcMotor.class, "motorTR");
         motorTL = hardwareMap.get(DcMotor.class, "motorTL");
