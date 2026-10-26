@@ -14,6 +14,8 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
 import dev.nextftc.control.feedback.PIDCoefficients;
 import dev.nextftc.control.feedback.PIDController;
+import dev.nextftc.control.feedforward.SimpleFFCoefficients;
+import dev.nextftc.control.feedforward.SimpleFeedforward;
 
 @TeleOp
 public class ScrimTeleOp extends OpMode {
@@ -23,13 +25,14 @@ public class ScrimTeleOp extends OpMode {
     IMU imu1;
 
 
+
     // blockers
     Servo pollenBlocker, nectarBlocker;
-    final double POLLEN_OPEN = 0.0;
-    final double POLLEN_CLOSED = 0.5;
+    final double POLLEN_OPEN = 0.6;
+    final double POLLEN_CLOSED = 0.75;
 
-    final double NECTAR_OPEN = 0.0;
-    final double NECTAR_CLOSED = 0.5;
+    final double NECTAR_OPEN = 0.7;
+    final double NECTAR_CLOSED = 0.85;
 
 
     boolean pollenBlockersOpen = false;
@@ -44,10 +47,18 @@ public class ScrimTeleOp extends OpMode {
 
     //shooter stuff
     PIDCoefficients
-            nectarCoeffs = new PIDCoefficients(0,0,0),
-            pollenCoeffs = new PIDCoefficients(0,0,0); // TODO tune these
+            nectarPIDCoeffs = new PIDCoefficients(0,0,0),
+            pollenPIDCoeffs = new PIDCoefficients(0,0,0); // TODO tune these
 
-    PIDController nectarPID = new PIDController(nectarCoeffs), pollenPID = new PIDController(pollenCoeffs);
+    SimpleFFCoefficients
+            pollenFFCoeffs = new SimpleFFCoefficients(0,0),
+            nectarFFCoeffs = new SimpleFFCoefficients(0,0);
+
+
+
+
+    PIDController nectarPID = new PIDController(nectarPIDCoeffs), pollenPID = new PIDController(pollenPIDCoeffs);
+    SimpleFeedforward nectarFF = new SimpleFeedforward(nectarFFCoeffs), pollenFF = new SimpleFeedforward(nectarFFCoeffs);
 
     DcMotorEx pollen, nectar;
 
@@ -82,7 +93,7 @@ public class ScrimTeleOp extends OpMode {
         nectarBlocker.setPosition(NECTAR_CLOSED);
 
         IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
-                RevHubOrientationOnRobot.LogoFacingDirection.LEFT,
+                RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
                 RevHubOrientationOnRobot.UsbFacingDirection.UP));
         // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
         imu1.initialize(parameters);
@@ -100,8 +111,8 @@ public class ScrimTeleOp extends OpMode {
 
         double nectarError = nectarVelo - nectar.getVelocity();
         double pollenError = pollenVelo - pollen.getVelocity();
-        double pollenPower = pollenPID.calculate(pollenError);
-        double nectarPower = nectarPID.calculate(nectarError);
+        double pollenPower = pollenPID.calculate(pollenError) + pollenFF.calculate(pollenVelo);
+        double nectarPower = nectarPID.calculate(nectarError) + nectarFF.calculate(nectarVelo);
 
 
         // drive code
