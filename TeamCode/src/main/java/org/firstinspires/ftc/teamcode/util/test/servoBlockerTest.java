@@ -8,12 +8,13 @@ import com.qualcomm.robotcore.hardware.Servo;
 @TeleOp
 public class servoBlockerTest extends OpMode {
 
+    public static String hMap = "servo";
     Servo servo;
     public static double pos = 0;
 
     @Override
     public void init() {
-        servo = hardwareMap.get(Servo.class,"servo");
+        servo = hardwareMap.get(Servo.class,hMap);
     }
 
     @Override

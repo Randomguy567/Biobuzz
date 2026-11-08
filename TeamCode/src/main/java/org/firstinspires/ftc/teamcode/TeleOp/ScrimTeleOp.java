@@ -1,6 +1,10 @@
 
 package org.firstinspires.ftc.teamcode.TeleOp;
 
+import com.acmerobotics.dashboard.FtcDashboard;
+import com.acmerobotics.dashboard.config.Config;
+import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
+import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -8,16 +12,15 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.IMU;
-import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
+import com.qualcomm.robotcore.util.ElapsedTime;
 
-import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import java.util.List;
 
-import dev.nextftc.control.feedback.PIDCoefficients;
 import dev.nextftc.control.feedback.PIDController;
-import dev.nextftc.control.feedforward.SimpleFFCoefficients;
 import dev.nextftc.control.feedforward.SimpleFeedforward;
 
 @TeleOp
+@Config
 public class ScrimTeleOp extends OpMode {
 
     // motors
@@ -28,62 +31,71 @@ public class ScrimTeleOp extends OpMode {
 
     // blockers
     Servo pollenBlocker, nectarBlocker;
-    final double POLLEN_OPEN = 0.6;
-    final double POLLEN_CLOSED = 0.75;
+    final double POLLEN_OPEN = 0.925;
+    final double POLLEN_CLOSED = 1;
 
-    final double NECTAR_OPEN = 0.7;
-    final double NECTAR_CLOSED = 0.85;
+    final double NECTAR_OPEN = 0.81;
+    final double NECTAR_CLOSED = 1;
 
 
-    boolean pollenBlockersOpen = false;
+    public boolean pollenBlockersOpen = false;
 
-    boolean nectarBlockersOpen = false;
+    public boolean nectarBlockersOpen = false;
 
     DcMotorEx intTrans; //intake transfer
 
 
 
+
+    //sequence
+    public static int intakeReverseWait = 50;
+    public static int shooterSpinUpWait = 2000;
+
+    ElapsedTime intakeTimer = new ElapsedTime();
+    ElapsedTime shootingTimer = new ElapsedTime();
+
+
+    boolean firstStep = true, nextStep = false;
+
+    boolean sequencing = false;
+
     //shooter stuff
-    PIDCoefficients
-            nectarPIDCoeffs = new PIDCoefficients(0,0,0),
-            pollenPIDCoeffs = new PIDCoefficients(0,0,0); // TODO tune these
 
-    SimpleFFCoefficients
-            pollenFFCoeffs = new SimpleFFCoefficients(0.037,0.00037),
-            nectarFFCoeffs = new SimpleFFCoefficients(0,0);
+    public static double kP = 0.0015,kD = 0.1,kS = 0.045,kV = 0.00034;
 
-
-
-
-    PIDController nectarPID = new PIDController(nectarPIDCoeffs), pollenPID = new PIDController(pollenPIDCoeffs);
-    SimpleFeedforward nectarFF = new SimpleFeedforward(nectarFFCoeffs), pollenFF = new SimpleFeedforward(pollenFFCoeffs);
 
     DcMotorEx pollen, nectar;
 
 
-    double nectarVelo = 0; // TODO tune this
-    double pollenVelo = 0;// TODO tune this
+    public static double nectarVelo = 1560;
+    public static double pollenVelo = 1480;
 
-    boolean shooting = false;
+    public boolean shooting = false;
 
+    double looptime;
 
-    enum IntakeState{
-        FORWARD,
-        STOPPED,
-        REVERSE
-    }
+    int intakeState = 1;
 
-    IntakeState intakeState = IntakeState.STOPPED;
+    public static double necPower = 0.59, polPower = 0.58;
+    public boolean usingPower = false;
+    ElapsedTime looptimer = new ElapsedTime();
 
+    //clear cache or smt(from ftc disky)
+    List<LynxModule> hubs;
 
-    public static double necPower = 0, polPower = 0;
-    public static boolean usingPower;
-
+    boolean flywheelReversed = false;
 
 
     @Override
     public void init() {
 
+        hubs = hardwareMap.getAll(LynxModule.class);
+        for (LynxModule hub : hubs) {
+            hub.setBulkCachingMode(LynxModule.BulkCachingMode.MANUAL);
+        }
+
+
+        telemetry = new MultipleTelemetry(telemetry, FtcDashboard.getInstance().getTelemetry());
 
 
         // Map drivetrain motors
@@ -104,16 +116,12 @@ public class ScrimTeleOp extends OpMode {
         pollenBlocker.setPosition(POLLEN_CLOSED);
         nectarBlocker.setPosition(NECTAR_CLOSED);
 
-        IMU.Parameters parameters = new IMU.Parameters(new RevHubOrientationOnRobot(
-                RevHubOrientationOnRobot.LogoFacingDirection.RIGHT,
-                RevHubOrientationOnRobot.UsbFacingDirection.UP));
-        // Without this, the REV Hub's orientation is assumed to be logo up / USB forward
-        imu1.initialize(parameters);
+
 
         intTrans = hardwareMap.get(DcMotorEx.class, "intTrans");
-        intTrans.setDirection(DcMotorSimple.Direction.FORWARD); // TODO make sure this direction is accurate for intaking balls
-
+        intTrans.setDirection(DcMotorSimple.Direction.FORWARD);
         pollen = hardwareMap.get(DcMotorEx.class,"pollenFly");
+        pollen.setDirection(DcMotorSimple.Direction.REVERSE);
         nectar = hardwareMap.get(DcMotorEx.class,"nectarFly");
 
     }
@@ -121,14 +129,49 @@ public class ScrimTeleOp extends OpMode {
     @Override
     public void loop() {
 
+
+
+
+        for (LynxModule hub : hubs) {
+            hub.clearBulkCache();
+        }
+
+        looptime = looptimer.milliseconds();
+        looptimer.reset();
+
+
+
+        PIDController nectarPid = new PIDController(kP,0,kD);
+        SimpleFeedforward nectarFf = new SimpleFeedforward(kS,kV,0);
+
+        PIDController pollenPid = new PIDController(kP,0,kD);
+        SimpleFeedforward pollenFf = new SimpleFeedforward(kS,kV,0);
+
         double nectarError = nectarVelo - nectar.getVelocity();
+        double nectarPower = nectarPid.calculate(nectarError) + nectarFf.calculate(nectar.getVelocity());
+
+
         double pollenError = pollenVelo - pollen.getVelocity();
-        double pollenPower = pollenPID.calculate(pollenError) + pollenFF.calculate(pollenVelo);
-        double nectarPower = nectarPID.calculate(nectarError) + nectarFF.calculate(nectarVelo);
+        double pollenPower = pollenPid.calculate(pollenError) + pollenFf.calculate(pollen.getVelocity());
+
+        //power toggle
+        if(gamepad1.startWasPressed()){
+            usingPower = !usingPower;
+        }
+
 
         if(usingPower){
             nectarPower = necPower;
             pollenPower = polPower;
+
+            if(nectar.getVelocity() <1350) nectarPower = 1;
+            if(nectar.getVelocity() <1200) pollenPower = 1;
+        }
+
+
+        if(flywheelReversed){
+            nectarPower*=-1;
+            pollenPower*=-1;
         }
 
 
@@ -137,23 +180,10 @@ public class ScrimTeleOp extends OpMode {
         double x = gamepad1.left_stick_x;
         double rx = gamepad1.right_stick_x;
 
-        if (gamepad1.options) {
-            imu1.resetYaw();
-        }
-
-        double botHeading = imu1.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
-
-//        // Rotate the movement direction counter to the bot's rotation
-//        double rotX = x * Math.cos(-botHeading) - y * Math.sin(-botHeading);
-//        double rotY = x * Math.sin(-botHeading) + y * Math.cos(-botHeading);
-//
-//        rotX = rotX * 1.1;  // Counteract imperfect strafing
 
         x = x * 1.1;
 
-        // Denominator is the largest motor power (absolute value) or 1
-        // This ensures all the powers maintain the same ratio,
-        // but only if at least one is out of the range [-1, 1]
+
         double denominator = Math.max(Math.abs(y) + Math.abs(x) + Math.abs(rx), 1);
         double frontLeftPower = (y + x + rx) / denominator;
         double backLeftPower = (y - x + rx) / denominator;
@@ -169,17 +199,13 @@ public class ScrimTeleOp extends OpMode {
 
         if (gamepad2.aWasPressed()) {
             pollenBlockersOpen = !pollenBlockersOpen; // toggle pollen blocker
+            nectarBlockersOpen = !nectarBlockersOpen; // toggle nectar blocker
         }
 
         if (pollenBlockersOpen) {
             pollenBlocker.setPosition(POLLEN_OPEN);
         } else {
             pollenBlocker.setPosition(POLLEN_CLOSED);
-        }
-
-
-        if (gamepad2.bWasPressed()) {
-            nectarBlockersOpen = !nectarBlockersOpen; // toggle nectar blocker
         }
 
         if (nectarBlockersOpen) {
@@ -191,43 +217,73 @@ public class ScrimTeleOp extends OpMode {
 
     // intake + transfer code
 
-        if(gamepad2.dpadUpWasPressed()){
-            switch(intakeState){
 
-                case REVERSE:
-                    intakeState = IntakeState.STOPPED;
-                case STOPPED:
-                    intakeState = IntakeState.FORWARD;
-            }
+        if(gamepad2.dpadUpWasPressed()){
+            if(intakeState == 0)intakeState = 2;
+            else if(intakeState == 1)intakeState = 2;
+            else if(intakeState == 2)intakeState = 1;
         }
 
         if(gamepad2.dpadDownWasPressed()){
-            switch(intakeState){
-
-                case FORWARD:
-                    intakeState = IntakeState.STOPPED;
-                case STOPPED:
-                    intakeState = IntakeState.REVERSE;
-            }
+            if(intakeState == 2)intakeState = 0;
+            else if(intakeState == 1) intakeState =0;
+            else if(intakeState == 0) intakeState =1;
         }
 
-        switch(intakeState){
-            case FORWARD:
-                intTrans.setPower(1);
-            case STOPPED:
-                intTrans.setPower(0);
-            case REVERSE:
-                intTrans.setPower(-1);
-        }
-
-
-
+        if(intakeState == 0)intTrans.setPower(-1);
+        else if(intakeState == 1)intTrans.setPower(0);
+        else if(intakeState == 2)intTrans.setPower(1);
 
     // shooting code
         if(gamepad2.xWasPressed()){
             shooting = !shooting;
+            flywheelReversed = false;
+
         }
 
+        if(gamepad2.yWasPressed()){
+            shooting = !shooting;
+            flywheelReversed = true;
+        }
+
+    //sequence
+        if(gamepad2.rightBumperWasPressed()){
+            sequencing = true;
+            intakeTimer.reset();
+            firstStep = true;
+            nextStep = false;
+            flywheelReversed = false;
+        }
+
+        if(sequencing){
+            if(intakeTimer.milliseconds() > intakeReverseWait && firstStep){
+                intakeState = 1;
+                shooting = true;
+                nectarBlockersOpen = true;
+                pollenBlockersOpen = true;
+                shootingTimer.reset();
+                firstStep = false;
+                nextStep = true;
+            }
+            else if(firstStep){
+                intakeState = 0;
+            }
+            if(shootingTimer.milliseconds() > shooterSpinUpWait && nextStep){
+                intakeState = 2;
+
+                sequencing = false;
+            }
+
+        }
+        //reset for sequence
+        if(gamepad2.leftBumperWasPressed()){
+            shooting = false;
+            pollenBlockersOpen = false;
+            nectarBlockersOpen = false;
+            intakeState=1;
+        }
+
+        //shoot toggle
         if(shooting){
             nectar.setPower(nectarPower);
             pollen.setPower(pollenPower);
@@ -237,6 +293,31 @@ public class ScrimTeleOp extends OpMode {
             pollen.setPower(0);
         }
 
+
+//
+        if(gamepad1.dpadUpWasPressed()){
+            nectarVelo += 20;
+        }
+        if(gamepad1.dpadDownWasPressed()){
+            nectarVelo -= 20;
+        }
+        if(gamepad1.dpadRightWasPressed()){
+            pollenVelo += 20;
+        }
+        if(gamepad1.dpadLeftWasPressed()){
+            pollenVelo -= 20;
+        }
+
+        telemetry.addData("intake state",intakeState);
+        telemetry.addData("pollen open?",pollenBlockersOpen);
+        telemetry.addData("nectar open?",nectarBlockersOpen);
+        telemetry.addData("Nectar power",nectar.getPower());
+        telemetry.addData("Pollen power",pollen.getPower());
+        telemetry.addData("Nectar Velocity",nectar.getVelocity());
+        telemetry.addData("Pollen velocity",pollen.getVelocity());
+        telemetry.addData("pollen target",pollenVelo);
+        telemetry.addData("nectar target",nectarVelo);
+        telemetry.addData("looptime",looptime);
 
     }
 }
