@@ -8,8 +8,6 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
-import org.firstinspires.ftc.robotcore.external.Telemetry;
-
 import dev.nextftc.control.feedback.PIDController;
 import dev.nextftc.control.feedforward.SimpleFeedforward;
 
@@ -18,20 +16,20 @@ import dev.nextftc.control.feedforward.SimpleFeedforward;
 public class flywheelPIDTuner extends OpMode {
 
     public static double kP = 0,kI = 0, kD = 0;
-    public static double kS = 0.037,kV = 0;
+    public static double kS = 0,kV = 0;
 
-    public static boolean tuningKS = false,reversed;
+    public static boolean tuningKS = false;
 
     public static double target;
 
 
 
 
-    DcMotorEx flywheel;
+    DcMotorEx nflywheel,pflywheel;
     @Override
     public void init() {
-        flywheel = hardwareMap.get(DcMotorEx.class, "flywheel");
-        if(reversed) flywheel.setDirection(DcMotorSimple.Direction.REVERSE);
+        nflywheel = hardwareMap.get(DcMotorEx.class, "nectarFly");
+        pflywheel = hardwareMap.get(DcMotorEx.class,"pollenFly");
 
         telemetry = new MultipleTelemetry(telemetry, FtcDashboard.getInstance().getTelemetry());
     }
@@ -45,18 +43,19 @@ public class flywheelPIDTuner extends OpMode {
 
 
         if(tuningKS){
-            flywheel.setPower(kS);
+            nflywheel.setPower(kS);
         }
         else {
-            double error = target - flywheel.getVelocity();
+            double error = target - nflywheel.getVelocity();
 
             double power = pid.calculate(error) + ff.calculate(target);
 
 
-            flywheel.setPower(power);
+            nflywheel.setPower(power);
+            pflywheel.setPower(power);
 
             telemetry.addData("Target:", target);
-            telemetry.addData("Current:", flywheel.getVelocity());
+            telemetry.addData("Current:", nflywheel.getVelocity());
             telemetry.addData("error:", error);
             telemetry.update();
         }
